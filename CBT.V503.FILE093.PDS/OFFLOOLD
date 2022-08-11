@@ -1,0 +1,1055 @@
+*          DATA SET CBT880     AT LEVEL 002 AS OF 10/28/84
+*  THIS PROGRAM NEEDS DAVE COLE'S MACLIB - CBT TAPE FILE 408.       NWK
+******************************************************************* NWK
+OFFL     TITLE 'OFFLOAD -- MISCELLANEOUS EQUATES'                       00032
+******************************************************************* NWK
+*   THIS VERSION OF DAVE COLE'S OFFLOAD PROGRAM HAS BEEN MODIFIED   NWK
+*    WITH A GLOBAL VARIABLE SO THE LRECL OF THE INPUT AND OUTPUT    NWK
+*    DATASETS CAN BE CHANGED MERELY BY MODIFYING THE GLOBAL AND     NWK
+*    REASSEMBLING THE PROGRAM.  AN EYECATCHER HAS BEEN ADDED SO     NWK
+*    THAT YOU CAN SEE THE ASSEMBLED LRECL BY BROWSING THE LOAD      NWK
+*    MODULE.  SEE LABEL "EYECATCH".                                 NWK
+*                                                                   NWK
+*   YOU NEED TO REASSEMBLE THE PROGRAM EVERY TIME YOU WANT TO       NWK
+*    CHANGE THE LRECL THAT THE PROGRAM TAKES.  (ADMITTEDLY IT'S     NWK
+*    BETTER TO DO THIS WITH A PARM AT EXECUTION TIME.)  BUT THIS    NWK
+*    WORKS.  (IT HAS NOT BEEN TESTED WITH LRECL MUCH LESS THAN 80.) NWK
+*                                                                   NWK
+*             S. GOLOB - NEWSWEEK - MOUNTAIN LAKES, N.J. - JULY 87  NWK
+******************************************************************* NWK
+         GBLC  &LRECL                                               NWK
+&LRECL   SETC  '80'   U CHANGE IT.  PROGRAM DEFAULTS TO LRECL=80    NWK
+         #REGS R                                                        00033
+         SPACE 3                                                        00034
+LINECT   EQU   58                  LINES PER PAGE                       00035
+OSCORE   EQU   4096                SIZE OF OS ELBOW ROOM                00036
+BUFSPACE EQU   1000                APPROXIMATE REASONABLE BUF SPACE     00037
+         SPACE 3                                                        00038
+         #PUT  SUBAD=PUTSYSP,MF=INIT                                    00039
+         TITLE 'OFFLOAD -- DSECTS'                                      00040
+         PRINT NOGEN                                                    00041
+         SPACE 3                                                        00042
+CVT      DSECT                                                          00043
+         CVT                                                            00044
+         SPACE 3                                                        00045
+         IKJTCB                                                         00046
+         SPACE 3                                                        00047
+TIOT     DSECT                                                          00048
+         IEFTIOT1                                                       00049
+         SPACE 3                                                        00050
+DCB      DSECT                                                          00051
+         #DCBD DSORG=(QS,PO)                                            00052
+         SPACE 3                                                        00053
+OPENWORK DSECT ,                                                        00054
+         ORG   OPENWORK+100                                             00055
+         IEFJFCBN                                                       00056
+         SPACE 3                                                        00057
+         PRINT GEN                                                      00058
+         TITLE 'OFFLOAD -- DSECTS - DATA EVENT CONTROL BLOCK'           00059
+DECB     DSECT ,                                                        00060
+DECBECB  DS    A                   EVENT CONTROL BLOCK                  00061
+DECBTYPE DS    2X                  FLAG BYTES                           00062
+DECBLGTH DS    Y                   KEY PLUS DATA LENGTH                 00063
+DECBDCB  DS    A                   DCB POINTER                          00064
+DECBBUFR DS    A                   BUFFER POINTER                       00065
+DECBIOB  DS    A                   IOB POINTER                          00066
+DECBLINK DS    A                   LINK TO RELATED DECB                 00067
+DECBLEN  EQU   *-DECB              DECB LENGTH                          00068
+         TITLE 'OFFLOAD -- DSECTS - PROGRAM INTERRUPT ELEMENT'          00069
+PIE      DSECT ,                                                        00070
+PIEPICA  DS    A                   PICA PTR                             00071
+PIEOPSW  DS    XL8                 OLD PSW                              00072
+PIER14   DS    A                   R14 SAVE AREA                        00073
+PIER15   DS    A                   R15 SAVE AREA                        00074
+PIER0    DS    A                   R0 SAVE AREA                         00075
+PIER1    DS    A                   R1 SAVE AREA                         00076
+PIER2    DS    A                   R2 SAVE AREA                         00077
+         TITLE 'OFFLOAD -- INITIAL ENTRY'                               00078
+OFFLOAD  #ENTER BASES=3,SAVTYPE=(LOCAL,BASE)                            00079
+         SPACE 1                                                        00080
+         B     EYECATCH                                             NWK
+         DC    C' ASSEMBLED LRECL FOR INPUT AND OUTPUT IS &LRECL '  NWK
+EYECATCH DS    0H                                                   NWK
+* REINITIALIZE DATA FOR SERIAL REUSABILITY                              00081
+         SP    PAGECTR,PAGECTR                                          00082
+         XC    LINES2GO,LINES2GO                                        00083
+         MVI   OUTDDNAM,C' '                                            00084
+         MVI   RCD+1,0                                                  00085
+         MVI   FLAG,0                                                   00086
+         SPACE 1                                                        00087
+* OPEN UNIT RECORD DATA SETS                                            00088
+         OPEN  (SYSIN,,SYSPRINT,OUTPUT)                                 00089
+         TM    PRTOFLGS,DCBOFOPN   SYSPRINT OPENED OK?                  00090
+         BZ    EXIT16              NO, TERMINATE                        00091
+         #PUT  TITLE1              YES, SET UP A TITLE                  00092
+         TM    RDROFLGS,DCBOFOPN   SYSIN OPENED OK?                     00093
+         BO    CONTROL             YES, CONTINUE                        00094
+         #PUT  NOSYSIN             NO, PRINT AN ERROR MSG               00095
+         B     EXIT16              GO TERMINATE                         00096
+         TITLE 'OFFLOAD -- ANALYZE THE SYSIN CONTROL CARDS'             00097
+* GET WORKING STORAGE                                                   00098
+CONTROL  TM    RDROFLGS,DCBOFOPN   READER STILL OPENED?                 00099
+         BZ    EOP                 NO, END OF PROGRAM                   00100
+         GETMAIN VC,LA=GETMQTY,A=WORKSTAR YES, GET WORKING CORE         00101
+         LTR   R15,R15             ANY GOTTEN?                          00102
+         BZ    COREOK              YES, CONTINUE                        00103
+         #PUT  NOCOREM             NO, ISSUE ERROR MSG                  00104
+         B     EXIT16              TERMINATE                            00105
+COREOK   LM    R0,R1,WORKSTAR      GET CORE PTR & LEN                   00106
+         AR    R1,R0               PNT TO CORE END                      00107
+         LH    R0,=Y(OSCORE)       GET OS ELBOW ROOM SIZE               00108
+         SR    R1,R0               GET END OF CORE TO KEEP              00109
+         ST    R1,WORKEND          SAVE FOR LATER                       00110
+         FREEMAIN R,LV=(0),A=(1)   GIVE OS SOME ELBOW ROOM              00111
+         TM    FLAG,UNLOAD         NEXT CARD ALREADY READ?              00112
+         MVI   FLAG,0              (CLEAR FLAGS IN ANY CASE)            00113
+         BO    GOTCARD             YES, GO PROCESS IT                   00114
+         SPACE 1                                                        00115
+* SETUP TO SKIP TO NEXT "O" CARD                                        00116
+RESTART  MVI   FLAG,0              CLEAR FUNCTION FLAGS                 00117
+GETCARD1 MVI   FLAG2,0             CLEAR SYNTAX FLAGS                   00118
+         MVI   PRECARD,C' '        CLEAR ERROR -                        00119
+         MVC   PRECARD+1(L'PRECARD-2),PRECARD  MSG AREA                 00120
+         SPACE 1                                                        00121
+* GET THE NEXT CARD AND CHECK IT FOR SUBSTANCE                          00122
+GETCARD2 GET   SYSIN,CARD          GET THE NEXT CARD                    00123
+         CLC   CARD(71),CARD-1     CARD BLANK?                          00124
+         BE    GETCARD2            YES, IGNORE IT                       00125
+         CLI   CARD,C'*'           NO, COMMENT CARD?                    00126
+         BE    CARDECHO            YES, GO PRINT IT                     00127
+         SPACE 1                                                        00128
+* SEARCH FOR AND IDENTIFY THE CARD'S VERB                               00129
+GOTCARD  LA    R3,CARD-1           GET CARD COLUMN SCANNER              00130
+         LA    R4,1                GET BXLE INCREMENT                   00131
+         LA    R5,CARD+70          GET BXLE LIMIT                       00132
+NAMELP   BXH   R3,R4,CARDSYNT      SCAN TO NEXT COLUMN                  00133
+         CLI   0(R3),C' '          BLANK YET?                           00134
+         BNE   NAMELP              NO, STILL THE NAME FIELD             00135
+VERBLP   BXH   R3,R4,CARDSYNT      YES, SCAN TO NEXT COLUMN             00136
+         CLI   0(R3),C' '          STILL BLANK?                         00137
+         BE    VERBLP              YES, LOOP BACK                       00138
+         LA    R3,1(,R3)           NO, POINT PAST THE VERB              00139
+         CLI   0(R3),C' '          VERB MUST BE A SINGLE CHARACTER      00140
+         BNE   CARDSYNT            IT'S NOT; ERROR                      00141
+         BCTR  R3,0                IT IS; POINT BACK TO IT              00142
+         CLI   0(R3),C'O'          "OFFLOAD" CARD?                      00143
+         BE    VO                  YES, GO PROCESS                      00144
+         TM    FLAG,UNLOAD         NO, MUST IT BE?                      00145
+         BZ    CARDIGNR            YES, IGNORE THE CARD                 00146
+         CLI   0(R3),C'S'          NO, SELECT CARD?                     00147
+         BE    VS                  YES, GO PROCESS                      00148
+         CLI   0(R3),C'E'          NO, EXCLUDE CARD?                    00149
+         BNE   CARDSYNT            NO, ERROR                            00150
+         TM    FLAG,SELECT         YES, ALREADY SELECT CARDS?           00151
+         BO    CARDNCAP            YES, ERROR                           00152
+         OI    FLAG,EXCLUDE        NO, REMEMBER EXCLUDE                 00153
+         B     GETOPND             GO GET OPERANDS                      00154
+VS       TM    FLAG,EXCLUDE        SELECT GIVEN; PREVIOUS EXCLUDE?      00155
+         BO    CARDNCAP            YES, ERROR                           00156
+         OI    FLAG,SELECT         NO, REMEMBER SELECT                  00157
+         B     GETOPND             GO GET OPERANDS                      00158
+VO       TM    FLAG,UNLOAD         OFFLOAD GIVEN; ALREADY GOT ONE?      00159
+         BO    PROCESS             YES, GO PERFORM FUNCTION             00160
+         OI    FLAG,UNLOAD         NO, GOT ONE NOW                      00161
+         #PUT  BLNK3               PUT SOME BLANK LINES                 00162
+         MVI   PRECARD,C'-'        ECHO CARRAGE CONTROL                 00163
+         SPACE 1                                                        00164
+* SEARCH FOR OPERANDS                                                   00165
+GETOPND  BXH   R3,R4,CARDSYNT      SCAN TO NEXT COLUMN                  00166
+         CLI   0(R3),C' '          STILL BLANK?                         00167
+         BE    GETOPND             YES, LOOP BACK                       00168
+         LA    R3,1(,R3)           NO, PNT PAST KEYWORD                 00169
+         CLI   0(R3),C'='          KEYWD MUST BE 1 CHARACTER LONG       00170
+         BNE   CARDSYNT            IT'S NOT; ERROR                      00171
+         BCTR  R3,0                IT IS; POINT BACK TO IT              00172
+         ST    R3,SAVESCAN         SAVE THE POINTER ICO ERROR           00173
+         NI    FLAG2,255-DDNAME    CLEAR DDN FLAG                       00174
+         TM    FLAG,SELECT+EXCLUDE UNLOAD CARD?                         00175
+         BNZ   NOTUNLD             NO, SKIP                             00176
+         SPACE 1                                                        00177
+* IDENTIFY UNLOAD CARD OPERANDS                                         00178
+         CLI   0(R3),C'T'          "T="?                                00179
+         BE    TOPND               YES, GO PROCESS                      00180
+         OI    FLAG2,DDNAME        NO, OPND OBJECTS MUST BE DDNAMES     00181
+         CLI   0(R3),C'I'          "I="?                                00182
+         BE    IOPND               YES, GO PROCESS                      00183
+         CLI   0(R3),C'O'          NO, "O="?                            00184
+         BNE   CARDSYNT            NO, ERROR                            00185
+         SPACE 1                                                        00186
+* PROCESS THE "O=" OPERAND                                              00187
+         TM    FLAG2,GOTOUT        YES, ALREADY GOT "O="?               00188
+         BO    CARDRDUN            YES, ERROR                           00189
+         OI    FLAG2,GOTOUT        NO, GOT ONE NOW                      00190
+         BXH   R3,R4,CARDSYNT      SCAN TO NEXT COLUMN                  00191
+         BAL   R14,GETNAME         SCAN OUT THE DDNAME                  00192
+         LA    R2,OUT              POINT TO THE OUTPUT DCB              00193
+         BAL   R14,CLOSE           INSURE THAT IT IS CLOSED             00194
+         MVC   OUTDDNAM,WORKAREA   RESET THE DCB'S DDNAME               00195
+         B     OPNDNEXT            GO SCAN FOR NEXT OPERAND             00196
+         SPACE 1                                                        00197
+* PROCESS THE "T=" OPERAND                                              00198
+TOPND    TM    FLAG2,GOTTYPE       "T=" ALREADY ENCOUNTERED?            00199
+         BO    CARDRDUN            YES, REDUNDANCY ERROR                00200
+         OI    FLAG2,GOTTYPE       NO, REMEMBER ICO ANOTHER             00201
+         BXH   R3,R4,CARDSYNT      SCAN TO NEXT COLUMN                  00202
+         BAL   R14,GETNAME         GO VERIFY SYNTAX                     00203
+         LR    R14,R3              SAVE EOD OF OPND PTR                 00204
+         L     R3,SAVESCAN         PNT BACK TO START OF OPERAND         00205
+         LA    R15,=C'IEBUPD'      PNT TO VALID PREFIXES                00206
+         LA    R1,5                GET LOOP CONTROL                     00207
+IEBLOOP  STC   R1,IEBCLC+1         SET CLC LENGTH FIELD                 00208
+         NOPR  0                   (FOR CP-67 TRACE)                    00209
+IEBCLC   CLC   0(*-*,R3),0(R15)    PREFIX OK?                           00210
+         BE    IEBOK1              YES, PROCEED                         00211
+         LA    R15,1(,R15)         NO, PNT TO NEXT VALID PREFIX         00212
+         BCTR  R1,0                GET ITS MACHINE LENGTH               00213
+         LTR   R1,R1               ALL VALID PREFIXES TESTED?           00214
+         BNM   IEBLOOP             NOPE, GO TEST THIS ONE               00215
+IEBOK1   LA    R3,1(R1,R3)         YEP, ASSUME NO PREFIX; PNT PAST PFX  00216
+         CLC   0(2,R3),=C'TE'      "T=IEBUPDTE"?                        00217
+         BNE   IEBTRY2             NO, SKIP                             00218
+         OI    FLAG,UPDTE          YES, REMEMBER                        00219
+         B     IEBOK2              DONE HERE                            00220
+IEBTRY2  CLC   0(2,R3),=C'AT'      NO, "T=IEBUPDAT"?                    00221
+         BNE   CARDSYNT            NO, SYNTAX ERROR                     00222
+         OI    FLAG,UPDAT          YES, REMEMBER IT                     00223
+IEBOK2   LA    R3,2(,R3)           PNT PAST "TE"/"AT"                   00224
+         CR    R14,R3              AT END OF OPERAND?                   00225
+         BNE   CARDSYNT            NO, ERROR                            00226
+         B     OPNDNEXT            YES, GO SCAN NEXT OPERAND            00227
+         SPACE 1                                                        00228
+* PROCESS THE "I=" OPERAND                                              00229
+IOPND    TM    FLAG2,GOTIN         ALREADY GOT "I="?                    00230
+         BO    CARDRDUN            YES, ERROR                           00231
+         OI    FLAG2,GOTIN         NO, GOT ONE NOW                      00232
+         L     R0,WORKSTAR         GET START OF INPUT DDNAMES LIST      00233
+         LR    R1,R0               INITIALIZE IT TO EMPTY               00234
+         BAL   R14,PUTNAMES        GO BUILD THE DDNAMES LIST            00235
+         ST    R1,ENDDDNS          SAVE END OF DDNAMES LIST             00236
+         SPACE 1                                                        00237
+* CHECK FOR MORE UNLOAD STATEMENT OPERANDS                              00238
+OPNDNEXT CLI   0(R3),C','          MORE OPERANDS?                       00239
+         BNE   CARDEND             NO, SKIP                             00240
+         CLI   1(R3),C' '          YES, CONTU CARD NEEDED?              00241
+         BNE   GETOPND             NO, JUST GO GET NEXT OPERAND         00242
+         BAL   R14,NEXTCARD        YES, GET NEXT CARD                   00243
+         B     GETOPND             GO GET NEXT OPERAND                  00244
+CARDEND  TM    FLAG2,GOTIN         "I=" GIVEN?                          00245
+         BZ    CARDMISO            NO, ERROR                            00246
+         MVC   ENDMNMS,ENDDDNS     INITIALIZE MEMBER NAMES LIST EMPTY   00247
+         TM    OUTOFLGS,DCBOFOPN   "O=" OPERAND REQUIRED?               00248
+         BO    CARDECHO            NO, GO ECHO THE CARD                 00249
+         CLI   OUTDDNAM,C' '       YES, "O=" GIVEN?                     00250
+         BE    CARDMISO            NO, ERROR                            00251
+         B     CARDECHO            YES, GO ECHO THE CARD                00252
+         SPACE 1                                                        00253
+* PROCESS S/E CARD OPERANDS                                             00254
+NOTUNLD  CLI   0(R3),C'M'          "M="?                                00255
+         BNE   CARDSYNT            NO, ERROR                            00256
+         L     R0,ENDDDNS          YES, PNT TO START OF MBR NMES LIST   00257
+         L     R1,ENDMNMS          PNT TO END OF MBR NMES LIST          00258
+         BAL   R14,PUTNAMES        GO GET MORE NAMES FROM THIS CARD     00259
+         ST    R1,ENDMNMS          STORE NEW END OF LIST                00260
+         CLI   0(R3),C' '          MORE OPERANDS?                       00261
+         BNE   CARDSYNT            ERROR; THERE ARE MORE OPERANDS       00262
+         SPACE 1                                                        00263
+* ECHO PRINT THE CONTROL CARD                                           00264
+CARDECHO #PUT  PRECARD             ECHO THE GOOD CARD                   00265
+         B     GETCARD1            GO GET NEXT CARD                     00266
+         SPACE 1                                                        00267
+* SYSIN END OF DATA ROUTINE                                             00268
+RDREOD   LA    R2,SYSIN            POINT TO THE DCB                     00269
+         BAL   R14,CLOSE           GO CLOSE THE DCB                     00270
+         TM    FLAG2,CONTINUE      READING CONTINU CARD?                00271
+         BZ    EODOK               NO, AOK                              00272
+         #PUT  EODERR              YES, ERROR                           00273
+         MVI   RCD+1,8             SET COMPLETION CODE                  00274
+         B     EOP                 END OF PROGRAM                       00275
+EODOK    TM    FLAG,UNLOAD         ANYTHING LEFT TO DO?                 00276
+         BZ    EOP                 NO, GO TERMINATE                     00277
+         TITLE 'OFFLOAD -- PREPARE TO PERFORM THE CURRENT OFFLOAD FUNCT*00278
+               ION'                                                     00279
+* INSERT THE MEMBER NAMES LIST TRAILER                                  00280
+PROCESS  L     R0,WORKEND          PNT TO END OF WORK AREA              00281
+         L     R14,ENDMNMS         PNT TO END OF USED PART              00282
+         LA    R1,L'DCBDDNAM(,R14) MAKE ROOM FOR TRAILER ENTRY          00283
+         SR    R0,R1               ENOUGH ROOM?                         00284
+         BNM   NOTFULL             YES, CONTINUE                        00285
+         #PUT  NOCOREM             NO, ISSUE ERROR MSG                  00286
+         B     RCD8                LOOP TO NEXT FUNCTION                00287
+         SPACE 1                                                        00288
+* RELEASE ANY UNUSED PART OF THE WORK AREA                              00289
+NOTFULL  MVC   0(L'DCBDDNAM,R14),EFFS GET TRAILER ENTRY                 00290
+         ST    R1,WORKEND          SET NEW END OF WORK AREA             00291
+         BZ    NOFREE              NONE, SKIP                           00292
+         FREEMAIN R,LV=(0),A=(1)   SOME; FREE IT                        00293
+         SPACE 1                                                        00294
+* SORT THE MEMBER NAMES LIST                                            00295
+NOFREE   L     R1,ENDDDNS          PNT TO START OF MEMBER NAMES         00296
+         L     R15,WORKEND         PNT TO END OF SAME                   00297
+         LA    R8,L'DCBDDNAM       GET ENTRY LENGTH                     00298
+         SR    R15,R1              GET LENGTH OF LIST                   00299
+         LR    R6,R8               GET ENTRY LENGTH (EL)                00300
+SORTSLL  AR    R6,R6               GET EL*(2**N)                        00301
+         CR    R6,R15              LIST LEN EXCEED YET?                 00302
+         BNH   SORTSLL             NO, LOOP                             00303
+         SR    R6,R8               YES, GET EL*((2**N)-1)               00304
+SORTLP1  SR    R6,R8                                                    00305
+         BZ    SORTED                                                   00306
+         SRL   R6,1                                                     00307
+         LR    R9,R15                                                   00308
+         SR    R9,R6                                                    00309
+         LR    R7,R8                                                    00310
+SORTLP2  LR    R4,R8                                                    00311
+SORTLP3  LA    R2,0(R7,R1)                                              00312
+         SR    R2,R4               GET 1ST COMPARE LOCATION             00313
+         LA    R3,0(R6,R2)         GET 2ND COMPARE LOCATION             00314
+         CLC   0(L'DCBDDNAM,R2),0(R3) SHOULD THESE 2 ELE BE SWITCHED?   00315
+         BNH   SORTNLP2            NO, SKIP                             00316
+         XC    0(L'DCBDDNAM,R2),0(R3) YES, -                            00317
+         XC    0(L'DCBDDNAM,R3),0(R2)  DO -                             00318
+         XC    0(L'DCBDDNAM,R2),0(R3)   SO                              00319
+         BXLE  R4,R6,SORTLP3       LOOP TO SEE IF ELE IS IN RIGHT PLACE 00320
+SORTNLP2 BXLE  R7,R8,SORTLP2       RIGHT PLACE, LOOP 4 NXT ELE          00321
+         B     SORTLP1             LOOP FOR NEXT LEVEL                  00322
+         SPACE 1                                                        00323
+* OPEN THE OUTPUT DATA SET                                              00324
+SORTED   TM    OUTOFLGS,DCBOFOPN   OUTPUT DS ALREADY OPEN?              00325
+         BO    OUTOPEND            YES, SKIP                            00326
+         MVC   OFFLDDNS,OFFLDDNS-1 NO, CLEAR INFO MSG                   00327
+         MVC   OFFLDDNS(L'DCBDDNAM),OUTDDNAM GET OUTPUT DDN TO MSG      00328
+         LA    R1,OFFLDDNS         SETUP FOR BLANK SCAN                 00329
+OFFLBLNK LA    R1,1(,R1)           PNT TO NEXT COLUMN                   00330
+         CLI   0(R1),C' '          BLANK YET?                           00331
+         BNE   OFFLBLNK            NO, LOOP                             00332
+         ST    R1,OFFLPTR          YES, REMEMBER THIS SPOT              00333
+         MVC   1(4,R1),=C'FROM'    INSERT MORE MSG TEXT                 00334
+         OPEN  (OUT,OUTPUT)        NO, OPEN IT                          00335
+* NOTE - THE CONTROL CARD SCAN HAS ALREADY VERIFIED THAT THIS OUTPUT DD 00336
+* CARD EXISTS.                                                          00337
+OUTOPEND L     R10,WORKSTAR        PNT TO INPUT DDNAMES                 00338
+         TITLE 'OFFLOAD -- OFFLOAD (SELECTED) PDS MEMBERS'              00339
+* REGISTER USAGE IN THIS SECTION                                        00340
+*        R10 --> DDNAME OF CURRENT INPUT DATA SET                       00341
+*        R7 --> CURRENT DIRECTORY ENTRY                                 00342
+*        R6 --> NEXT MEMBER NAME TO BE SELECTED OR EXCLUDED             00343
+*        R2 --> CURRENT INPUT DECB                                      00344
+         SPACE 1                                                        00345
+* OPEN AN INPUT DATA SET                                                00346
+DATSETLP SR    R0,R0               GET A ZERO                           00347
+         STH   R0,INBLKSI          INSURE BLKSIZE CLEAR                 00348
+         STH   R0,INBUFL           INSURE BUFL CLEAR                    00349
+         STC   R0,INBUFNO          INSURE BUFNO CLEAR                   00350
+         MVC   INDDNAM,0(R10)      GET INPUT DDNAME                     00351
+         L     R1,OFFLPTR          PNT TO INFO MSG TEXT                 00352
+         MVC   6(L'DCBDDNAM,R1),0(R10) GET INPUT DDNAME                 00353
+         NI    FLAG,255-NOTPDS     ASSUME DS IS PARTITIONED             00354
+         OPEN  IN                  OPEN THE INPUT DATA SET              00355
+         TM    FLAG,NOTPDS         PDS?                                 00356
+         BZ    ISPDS               YES, AOK                             00357
+         LA    R1,2+L'DCBDDNAM+SEQFAKLN NO, -                           00358
+         STH   R1,RDAREA            FAKE A -                            00359
+         MVC   RDAREA+2(L'DCBDDNAM),0(R10) DIRECTORY -                  00360
+         MVC   RDAREA+2+L'DCBDDNAM(SEQFAKLN),SEQFAKRY BLOCK.            00361
+         B     SEQFAKIT            GO PROCESS AS A SINGLE MEMBER        00362
+* NOTE - THE CONTROL CARD SCAN HAS ALREADY VERIFIED THAT THIS INPUT DD  00363
+* CARD EXISTS.                                                          00364
+         SPACE 1                                                        00365
+* PARTITIONED INPUT. OPEN THE DIRECTORY                                 00366
+ISPDS    MVC   DRCDDNAM,0(R10)     GET THE DDNAME                       00367
+         OPEN  DRCTY               OPEN THE DIRECTORY                   00368
+         SPACE 1                                                        00369
+* SETUP FOR DIRECTORY BLOCK READ AND SCAN                               00370
+         XC    RDAREA(2),RDAREA    FORCE INITIAL DRCTY BLK READ         00371
+SEQFAKIT L     R6,ENDDDNS          PNT TO START OF MEMBER NAMES         00372
+DRCTYLP  LH    R1,RDAREA           GET USED LENGTH OF DRCTY BLK         00373
+         LA    R1,RDAREA(R1)       PNT PAST THE USED AREA               00374
+         ST    R1,DRCTYEND         SAVE FOR LATER                       00375
+         MVI   RDAREA+1,0          SETUP TO ADVANCE TO 1ST ENTRY        00376
+         LA    R7,RDAREA-10        SETUP TO ADVANCE TO 1ST ENTRY        00377
+         SPACE 1                                                        00378
+* SCAN THE DIRECTORY BLOCK FOR THE NEXT DIRECTORY ENTRY                 00379
+MEMBERLP NI    11(R7),X'1F'        ISOLATE ENTRY LENGTH                 00380
+         SR    R1,R1               CLEAR FOR 'IC'                       00381
+         IC    R1,11(,R7)          GET ENTRY 'LENGTH'                   00382
+         LA    R1,12(R1,R1)        GET REAL ENTRY LENGTH                00383
+         AR    R7,R1               PNT TO NEXT DIRECTORY ENTRY          00384
+         C     R7,DRCTYEND         END OF THIS BLOCK?                   00385
+         BL    FINDMBR             NO, CONTINUE PROCESSING THIS BLK     00386
+         SPACE 1                                                        00387
+* READ THE NEXT DIRECTORY BLOCK. HANDLE EOD OR I/O ERRORS               00388
+         GET   DRCTY,RDAREA        READ THE DIRECTORY BLOCK             00389
+         B     DRCTYLP             LOOP TO SCAN IT                      00390
+DRCERR   MVC   DRCTYERR+L'DRCTYERR(L'DCBDDNAM),0(R10) NO, GET DDNAME    00391
+         #PUT  DRCTYERR            PRINT ERROR MSG                      00392
+         MVI   RCD+1,8             SET COMPLETION CODE                  00393
+         B     DSDONE              SKIP TO NEXT DATA SET                00394
+         SPACE 1                                                        00395
+* DETERMINE IF THE MEMBER POINTED TO BY THE CURRENT DIRECTORY ENTRY     00396
+* SHOULD BE OFFLOADED                                                   00397
+FINDMBR  CLC   0(L'DCBDDNAM,R7),EFFS EO DRCTY 4 THIS DS?                00398
+         BE    DSDONE              YES, SKIP OUT                        00399
+NMEGOTST CLC   0(L'DCBDDNAM,R7),0(R6) NO, CURRENT NAME IN THE LIST?     00400
+         BL    NOGOTNME            NO, GO CHECK FUNCTION                00401
+         BE    GOTNME              YES, GO CHECK FUNCTION               00402
+         LA    R6,L'DCBDDNAM(,R6)  DON'T KNOW; ADVANCE LIST SCANNER     00403
+         B     NMEGOTST            GO TEST NAME AGAIN                   00404
+NOGOTNME TM    FLAG,SELECT         SELECT FUNCTION?                     00405
+         BO    MEMBERLP            YES, SKIP THIS MEMBER                00406
+         B     GOTMEMBR            NO, OFFLOAD THIS MEMBER              00407
+GOTNME   TM    FLAG,EXCLUDE        EXCLUDE FUNCTION?                    00408
+         BO    MEMBERLP            YES, SKIP THIS MEMBER                00409
+         XC    0(L'DCBDDNAM,R6),0(R6) NO, CLR NME FROM LIST             00410
+         SPACE 1                                                        00411
+* MEMBER LOCATED - TELL USER ABOUT IT                                   00412
+GOTMEMBR NI    FLAG,255-CTLCDERR   CLEAR IEBUPDTE CTL CD FND ERR FLG    00413
+         MVC   OFFLMBRN,0(R7)      PNT MEMBER NAME INTO INFO MSG        00414
+         #PUT  OFFLMSG             TELL USER WHAT'S HAPPENING           00415
+         SPACE 1                                                        00416
+* POINT THE INPUT DATA SET TO THE MEMBER TO BE OFFLOADED                00417
+         TM    FLAG,NOTPDS         SEQUENTIAL DS?                       00418
+         BO    SKIPFIND            YES, FORGET ABOUT "FIND"             00419
+         MVC   BLDLTTR0(3),8(R7)   SET TTR OF TTR0                      00420
+         POINT IN,BLDLTTR0         POINT TO THE CORRECT MEMBER          00421
+         SPACE 1                                                        00422
+* PRIME THE INPUT BUFFERS                                               00423
+SKIPFIND L     R2,BUFSSTAR         PNT TO 1ST DECB                      00424
+         USING DECB,R2             DECLARE DECB BASE                    00425
+PRIMELIB READ  (R2),SF,MF=E        START A READ TO IT                   00426
+         L     R2,DECBLINK         PNT TO NEXT DECB                     00427
+         C     R2,BUFSSTAR         ALL READS STARTED YET?               00428
+         BNE   PRIMELIB            NO, LOOP FOR NEXT                    00429
+         SPACE 1                                                        00430
+* CREATE AND PUNCH THE ./ADD CARD (IF DESRIED)                          00431
+         TM    FLAG,UPDTE+UPDAT    ./ADD WANTED?                        00432
+         BZ    CHECKLIB            NO, SKIP                             00433
+         MVC   ADDCARD+15(L'ADDCARD-15),ADDCARD+14 CLEAR OLD OPNDS      00434
+         MVC   ADDCARD+15(5),=C'NAME=' ASSUME IEBUPDTE FORMAT           00435
+         MVC   ADDCARD+20(L'DCBDDNAM),0(R7) GET THE MEMBER NAME         00436
+         TM    FLAG,UPDAT          ASSUMPTION CORRECT?                  00437
+         BZ    PUTADD              YES, GO PUNCH THE CARD               00438
+         MVC   ADDCARD+15(L'DCBDDNAM+1),ADDCARD+20 NO, IEBUPDAT FORMAT  00439
+         LA    R1,ADDCARD+15       SETUP FOR BLANK SCAN                 00440
+ADDBLNK  LA    R1,1(,R1)           PNT TO NEXT COLUMN                   00441
+         CLI   0(R1),C' '          BLANK YET?                           00442
+         BNE   ADDBLNK             NO, LOOP                             00443
+         MVC   0(7,R1),=C',00,0,0' YES, GET REST OF UPDAT OPNDS         00444
+PUTADD   PUT   OUT,ADDCARD         PUNCH IT                             00445
+         SPACE 1                                                        00446
+* CHECK THE NEXT INPUT BLOCK AND SETUP TO SCAN IT FOR LOGICAL RECORDS   00447
+CHECKLIB NI    FLAG2,255-IOERROR   CLEAR I/O ERROR FLAG                 00448
+         CHECK (R2)                WAIT FOR A READ TO COMPLETE          00449
+         L     R3,DECBBUFR         POINT TO 1ST RECORD IN THE BUFFER    00450
+         LH    R4,INBUFL           GET BUFFER LENGTH                    00451
+         AR    R4,R3               PNT TO END OF BUFFER                 00452
+         L     R1,DECBIOB          PNT TO RELATED IOB                   00453
+         SH    R4,14(,R1)          PNT TO END OF BLOCK READ             00454
+         SPACE 1                                                        00455
+* SCAN THE INPUT BLOCK AND HANDLE EOB AND I/O ERROR CONDITIONS          00456
+CARDLOOP CR    R3,R4               END OF BLOCK YET?                    00457
+         BL    PUTCARD             NO, GO PUT NEXT CARD                 00458
+         TM    FLAG2,IOERROR       YES, HAS AN I/O ERR OCCURED?         00459
+         BZ    READLIB             NO, SKIP                             00460
+         #PUT  IOERPFIX            YES, PRINT THE ERROR MSG             00461
+READLIB  READ  (R2),SF,MF=E        READ FUTURE BLOCK                    00462
+         L     R2,DECBLINK         LINK TO NEXT DECB                    00463
+         B     CHECKLIB            GO CHECK ITS I/O                     00464
+         SPACE 1                                                        00465
+* TEST FOR IEBUPDTE CONTROL CARDS FROM THE INPUT DATA SET               00466
+PUTCARD  CLC   0(2,R3),ADDCARD     IEBUPDTE CTL CARD?                   00467
+         BNE   PUTITOUT            NO, AOK                              00468
+         TM    FLAG,UPDAT+UPDTE    YES, ./ADD'S BEING INSERTED?         00469
+         BZ    PUTITOUT            NO, AOK                              00470
+         TM    FLAG,CTLCDERR       YES, ERROR BEFORE FROM SAME MEMBER?  00471
+         BO    PRTERRCD            YES, JUST PRINT THE CARD             00472
+         OI    FLAG,CTLCDERR       NO, SET THE FLAG                     00473
+         #PUT  CTLERR1             PRINT ERROR EXPLAINATION             00474
+         #PUT  CTLERR2             MORE EXPLAINATION                    00475
+         CLI   RCD+1,4             COMPLETION CODE ALREADY SET?         00476
+         BNL   PRTERRCD            YES, SKIP                            00477
+         MVI   RCD+1,4             NO, SET IT                           00478
+PRTERRCD MVC   CARD2,0(R3)         COPY ERROR CARD TO BUFFER            00479
+         #PUT  ERRCARD             PRINT IT                             00480
+         MVC   0(2,R3),=C'><'      KILL THE './'                        00481
+         SPACE 1                                                        00482
+* PUNCH THE NEXT CARD AND LOOP FOR THE FOLLOWING CARD                   00483
+PUTITOUT PUT   OUT,(R3)            PUT THE NEXT CARD                    00484
+         AH    R3,INLRECL          PNT TO FOLLOWING CARD                00485
+         B     CARDLOOP            LOOP TO PROCESS                      00486
+         DROP  R2                  RELEASE DECB BASE                    00487
+         SPACE 1                                                        00488
+* CURRENT DATA SET FINISHED - CLOSE IT AND FREE ITS BUFFERS             00489
+DSDONE   CLOSE (IN,,DRCTY)         CLOSE THE INPUT DATA SET             00490
+         LM    R0,R1,BUFSSIZE      GET IN BUFS LEN AND ADDR             00491
+         FREEMAIN R,LV=(0),A=(1)   RELEASE THE BUFFERS                  00492
+         LA    R10,L'DCBDDNAM(,R10) PNT TO NEXT INPUT DDNAME            00493
+         C     R10,ENDDDNS         END OF NAMES?                        00494
+         BL    DATSETLP            NO, LOOP TO PROCESS THIS DS          00495
+         SPACE 1                                                        00496
+* CURRENT OFFLOADING FUNCTION FINISHED - FOR SELECT FUNCTIONS DETERMINE 00497
+* IF ALL GIVEN NAMES WERE SELECTED                                      00498
+         TM    FLAG,SELECT         SELECT FUNCTION?                     00499
+         BZ    WARLSE              NO, SKIP                             00500
+         L     R2,ENDDDNS          YES, PNT TO START OF MBR MNES        00501
+NOTSELCT C     R2,ENDMNMS          END OF GIVEN NAMES YET?              00502
+         BNL   WARLSE              YES, DONE                            00503
+         OC    0(L'DCBDDNAM,R2),0(R2) NO, THIS NME USED?                00504
+         BZ    SELECTD             YES, CONTINUE                        00505
+         MVC   NTSELMBR,0(R2)      NO, PUT NME INTO MSG                 00506
+         #PUT  NTSELMSG            TELL USER                            00507
+         CLI   RCD+1,4             TEST RETURN CODE                     00508
+         BNL   SELECTD             ALREADY SET                          00509
+         MVI   RCD+1,4             NOT SET; SET IT                      00510
+SELECTD  LA    R2,L'DCBDDNAM(,R2)  PNT TO NEXT GIVEN NAME               00511
+         B     NOTSELCT            LOOP TO TEST IT                      00512
+         SPACE 1                                                        00513
+* FREE THE WORK AREA AND LOOP FOR MORE CONTROL CARDS                    00514
+WARLSE   LM    R1,R2,WORKSTAR      YES, GET WA START & END              00515
+         SR    R2,R1               GET WORK AREA LENGTH                 00516
+         FREEMAIN R,LV=(R2),A=(1)  RELEASE THE WORKAREA                 00517
+         B     CONTROL             GO READ SOME MORE CTL CARDS          00518
+         TITLE 'OFFLOAD -- END OF JOB PROCESSING'                       00519
+EXIT16   MVI   RCD+1,16            SET ERROR COMPLETION CODE            00520
+         SPACE 1                                                        00521
+* WRITE THE EOP MSG IF SYSPRINT IS OPEN                                 00522
+EOP      TM    PRTOFLGS,DCBOFOPN   SYSPRINT OPEN?                       00523
+         BZ    RETURN              NO, SKIP                             00524
+         #PUT  BLNK3               YES, PRINT SOME BLANK LINES          00525
+         LA    R1,EOPM-1           ASSUME RELATIVELY GOOD ENDING        00526
+         CLI   RCD+1,8             CORRECT?                             00527
+         BNH   PUTEND              YES, GO PRINT MSG                    00528
+         LA    R1,PGMTERM-1        NO, PNT TO DIFFERENT MSG             00529
+PUTEND   #PUT  (R1)                PRINT THE END OF PROGRAM MSG         00530
+         SPACE 1                                                        00531
+* CLOSE ALL DATA SETS                                                   00532
+         LA    R2,OUT              POINT TO THE OUTPUT DATA SET         00533
+         BAL   R14,CLOSE           CLOSE IT                             00534
+         LA    R2,SYSPRINT         POINT TO THE SYSPRINT DATA SET       00535
+         BAL   R14,CLOSE           CLOSE IT                             00536
+         SPACE 1                                                        00537
+* RETURN TO CALLER                                                      00538
+RETURN   LH    R15,RCD             GET THE COMPLETION CODE              00539
+         #EXIT ((R14,R12)),RC=(R15) RETURN TO CALLER                    00540
+         TITLE 'OFFLOAD -- INPUT CONTROL CARD ERROR HANDLING ROUTINE'   00541
+CARDNCAP MVC   PRECARD+L'PRECARD-24(23),=C'INCOMPATABLE FUNCTION -'     00542
+         B     CARDPUT             GO PRINT THE CARD ERROR              00543
+         SPACE 1                                                        00544
+CARDSYNT TM    FLAG,UNLOAD         SHOULD THE CARD HAVE BEEN IGNORED?   00545
+         BZ    CARDIGNR            YES, GO SAY SO                       00546
+         MVC   PRECARD+L'PRECARD-15(14),=C'SYNTAX ERROR -' NO,          00547
+         B     CARDPUT             GO PRINT THE CARD ERROR              00548
+         SPACE 1                                                        00549
+CARDIGNR MVC   PRECARD+L'PRECARD-15(14),=C'CARD IGNORED -'              00550
+         B     CARDPUT2            GO PRINT THE ERROR CARD              00551
+         SPACE 1                                                        00552
+CARDMISO MVC   PRECARD+L'PRECARD-28(27),=C'REQUIRED OPERANDS MISSING -' 00553
+         B     CARDPUT2            GO PRINT THE ERROR CARD              00554
+         SPACE 1                                                        00555
+CARDCORE MVC   PRECARD+L'PRECARD-17(16),=C'CORE EXHAUSTED -'            00556
+         B     GETSCAN             GO GET ERROR POINTER                 00557
+         SPACE 1                                                        00558
+CARDRDUN MVC   PRECARD+L'PRECARD-21(20),=C'REDUNDANT OPERANDS -'        00559
+         B     GETSCAN             GO GET ERROR POINTER                 00560
+         SPACE 1                                                        00561
+CARDBDDN MVC   PRECARD+L'PRECARD-18(17),=C'MISSING DD CARD -'           00562
+GETSCAN  L     R3,SAVESCAN         RESET THE ERROR POINTER              00563
+         SPACE 1                                                        00564
+CARDPUT  #PUT  PRECARD             PRINT THE CARD ERROR                 00565
+         LA    R2,OUT              POINT TO THE OUTPUT DATA SET         00566
+         BAL   R14,CLOSE           INSURE THAT IT IS CLOSED             00567
+         MVI   OUTDDNAM,C' '       FLAG "O=" OPERAND REQUIRED           00568
+         MVI   PRECARD,C' '        CLEAR THE ERROR CARD                 00569
+         MVC   PRECARD+1(L'PRECARD+L'CARD-1),PRECARD CLR ERR CRD        00570
+         MVI   0(R3),C'*'          UNDERLINE THE ERROR                  00571
+CARDPUT2 #PUT  PRECARD             UNDERLINE THE ERROR                  00572
+RCD8     MVI   RCD+1,8             SET THE COMPLETION CODE              00573
+         TM    RDROFLGS,DCBOFOPN   SYSIN STILL OPEN?                    00574
+         BZ    WARLSE              NO, GO FORCE PGM TERMINATION         00575
+         B     RESTART             LOOP FOR NEXT CONTROL STATEMENT      00576
+         TITLE 'OFFLOAD -- CARDEXIT - OPEN DCB EXIT FOR OUT, IN, AND SY*00577
+               SIN'                                                     00578
+* FORCE THE BLKSIZE AND BUFL TO A (LOWER) MULTIPLE OF THE LRECL         00579
+         USING DCB,R1              DECLARE THE DCB BASE                 00580
+CARDEXIT LH    R3,DCBBLKSI         GET THE BLOCK SIZE (IF ANY)          00581
+         LH    R4,DCBLRECL         GET THE LRECL                        00582
+         SR    R2,R2               CLEAR FOR DEVIDE                     00583
+         DR    R2,R4               GET THE BLOCKING FACTOR              00584
+         MR    R2,R4               INSURE BLKSI = N*LRECL               00585
+         CR    R3,R4               IS FILE BLOCKED?                     00586
+         BH    GOTBLKSI            YES, SKIP                            00587
+         LR    R3,R4               NO, INSURE BLKSI = LRECL             00588
+GOTBLKSI STH   R3,DCBBLKSI         SET THE BLOCK SIZE                   00589
+         STH   R3,DCBBUFL          SET THE BUFL (ASSUME QS)             00590
+         SPACE 1                                                        00591
+* IF AN NCP (BPAM) OF BUFNO (QSAM OR BPAM) ARE GIVEN VIA JCL OR DATA    00592
+* SET LABEL, THEN USE IT. FOR BPAM PREFER A GIVEN NCP OVER A GIVEN      00593
+* BUFNO. ALSO FOR BPAM INHIBIT AUTOMATIC BUFFER ALLOCATION.             00594
+         LA    R6,DCBBUFNO         POINT TO BUFNO FIELD                 00595
+         TM    DCBMACF1,DCBMRRD    BSAM/BPAM DS?                        00596
+         BZ    NOTBASIC            NO, DSORG=PS; SKIP                   00597
+         LA    R6,DCBNCP           YES, POINT TO NCP (NOT BUFNO)        00598
+         CLI   DCBNCP,0            NCP GIVEN?                           00599
+         BNE   GOTNCP              YES, USE IT                          00600
+         MVC   DCBNCP,DCBBUFNO     NO, USE BUFNO (IF ANY)               00601
+GOTNCP   MVI   DCBBUFNO,0          INSURE NOW BUFFERS GOTTEN            00602
+NOTBASIC CLI   0(R6),0             BUFNO/NCP GIVEN?                     00603
+         BNE   BUFSGEN             YES, SKIP                            00604
+         SPACE 1                                                        00605
+* BUFNO AND NCP NUT GIVEN - CALCULATE A REASONABLE VALUE AND USE IT.    00606
+         LA    R5,BUFSPACE         NO, GET REASONABLE BUFFER SPACE      00607
+         SR    R4,R4               CLEAR FRO DEVICE                     00608
+         DR    R4,R3               GET REASONABLE BUFNO/NCP             00609
+         STC   R5,0(,R6)           STORE REASONABLE BUFNO/NCP           00610
+         LA    R5,10               GET MAX REASONABLE BUFNO/NCP         00611
+         CLI   0(R6),10            MAX EXCEEDED?                        00612
+         BH    BUFNRSET            YES, GO RESET                        00613
+         LA    R5,3                NO, GET MIN REASONABLE BUFNO/NCP     00614
+         CLI   0(R6),3             MIN EXCEEDED?                        00615
+         BNL   BUFSGEN             NO, CONTINUE                         00616
+BUFNRSET STC   R5,0(,R6)           YES, RESET TO MAX/MIN REASONABLE     00617
+         SPACE 1                                                        00618
+* FOR BPAM CREATE A SPECIAL POOL OF BUFFERS AND DECB'S                  00619
+BUFSGEN  TM    DCBMACF1,DCBMRRD    BASM/BPAM DS?                        00620
+         BCR   8,R14               NO, RETURN TO OPEN                   00621
+         L     R2,DCBDEBAD         YES, PNT TO OPEN'S WORK AREA         00622
+         TM    JFCDSRG1-OPENWORK(R2),JFCORGPO DS ACTUALLY PDS?          00623
+         BO    ACTULPDS            YES, SKIP                            00624
+         OI    FLAG,NOTPDS         NO, REMEMBER THIS                    00625
+ACTULPDS ST    R14,SAVER14A        SAVE RETURN ADDRESS                  00626
+         SR    R2,R2               CLEAR FOR 'IC'                       00627
+         IC    R2,0(,R6)           GET NUMBER OF BUFFERS TO BUILD       00628
+         LA    R5,DECBLEN          GET DECB LENGTH                      00629
+         LA    R1,0(R5,R3)         GET LENGTH OF DECB+BUFFER            00630
+         DROP  R1                  RELEASE DCB BASE                     00631
+         MR    R0,R2               GET TOTAL CORE REQUIRED              00632
+         ST    R1,BUFSSIZE         SAVE LENGTH FOR LATER FREEMAIN       00633
+         GETMAIN R,LV=(R1)         GET CORE FOR BUFFERS                 00634
+         ST    R1,BUFSSTAR         SAVE START FOR LATER                 00635
+         MR    R4,R2               GET TOTAL LENGTH OF DECB'S           00636
+         AR    R5,R1               PNT TO 1ST BUFFER                    00637
+DECBINIT LR    R4,R1               PNT TO NEXT DECB                     00638
+         USING DECB,R4             DECLARE DECB BASE                    00639
+         MVC   0(DECBBUFR-DECB,R4),DECBMODL GET SKELETON DECB           00640
+         ST    R5,DECBBUFR         SET BUFFER POINTER                   00641
+         AR    R5,R3               ADVANCE BUFFER PTR                   00642
+         LA    R1,DECBLEN(,R4)     PNT TO NEXT DECB                     00643
+         ST    R1,DECBLINK         LINK IT TO THIS ONE                  00644
+         BCT   R2,DECBINIT         LOOP TO PROCESS NEXT DECB            00645
+         MVC   DECBLINK,BUFSSTAR   MAKE DECB LINKS CIRCULAR             00646
+         DROP  R4                  RELEASE DECB BASE                    00647
+         L     R14,SAVER14A        RESTORE RETURN ADDRESS               00648
+         BR    R14                 RETURN TO OPEN                       00649
+         TITLE 'OFFLOAD -- CLOSE - CLOSE A DATA SET AND FREE ITS BUFFER*00650
+               S'                                                       00651
+         USING DCB,R2              DECLARE DCB BASE                     00652
+CLOSE    TM    DCBOFLGS,DCBOFOPN   IS THE DATA SET OPEN?                00653
+         BCR   8,R14               NO, RETURN TO CALLER                 00654
+         ST    R14,SAVER14A        YES, SAVE THE RETURN ADDRESS         00655
+         SPACE 1                                                        00656
+* CLOSE THE DATA SET                                                    00657
+         CLOSE ((R2))              CLOSE THE DATA SET                   00658
+         SPACE 1                                                        00659
+* FREE ITS BUFFERS                                                      00660
+         FREEPOOL (R2)             FREE ITS BUFFERS                     00661
+         L     R14,SAVER14A        RESTORE THE RETURN ADDRESS           00662
+         BR    R14                 RETURN TO CALLER                     00663
+         DROP  R2                  RELEASE THE DCB BASE                 00664
+         TITLE 'OFFLOAD -- GETNAME - SCAN OUT A NAME FROM AN INPUT CONT*00665
+               ROL STATEMENT'                                           00666
+GETNAME  STM   R14,R1,SAVER14B     SAVE WORK REGISTERS                  00667
+         LA    R1,1(,R3)           POINT TO NAME TO BE SCANNED          00668
+         ST    R1,SAVESCAN         SAVE ICO ERROR                       00669
+         MVI   WORKAREA,C' '       CLEAR THE -                          00670
+         MVC   WORKAREA+1(L'DCBDDNAM-1),WORKAREA  WORK AREA             00671
+         LA    R15,WORKAREA-1      GET OUTPUT SCANNER                   00672
+         LR    R0,R4               GET BXLE INCREMENT ("1")             00673
+         LA    R1,WORKAREA+L'DCBDDNAM-1 GET BXLE LIMIT                  00674
+         LA    R14,VALID+L'VALID-10 PNT 2 VALID 1ST CHARACTERS          00675
+         SPACE 1                                                        00676
+* VALIDATE THE NAME'S SYNTAX                                            00677
+GETNLP1  BXH   R3,R4,CARDSYNT      SCAN TO NEXT COLUMN                  00678
+GETNLP2  BCTR  R14,0               POINT TO NEXT VALID CHARACTER        00679
+         CLC   0(1,R3),0(R14)      CARD CHARACTER VALID?                00680
+         BL    GETNLP2             DON'T KNOW YET; LOOP                 00681
+         BH    GETNTDLM            NO, GO SEE IF IT'S A DELIMITER       00682
+         CLI   0(R3),0             PROBABLE; IS IT X'00'?               00683
+         BE    CARDSYNT            YES, CHARACTER IS INVALID            00684
+         BXH   R15,R0,CARDSYNT     NO, CHAR VLD; ADV 2 NXT OPUT LOCATN  00685
+         MVC   0(1,R15),0(R3)      SAVE THIS CHARACTER                  00686
+         LA    R14,VALID+L'VALID   PNT TO LIST OF VALID NOT-FIRST CHARS 00687
+         B     GETNLP1             LOOP TO TEST NEXT COLUMN             00688
+         SPACE 1                                                        00689
+* VALIDATE THE DELIMITER FOLLOWING THE NAME                             00690
+GETNTDLM CLI   0(R3),C','          COMMA DELIMITER?                     00691
+         BE    GOTNAME             YES, GOT A NAME                      00692
+         TM    FLAG2,PAREN         NO, WITHIN PARENS?                   00693
+         BZ    GETNTBLK            NO, DLM MUST BE BLANK                00694
+         CLI   0(R3),C')'          YES, DLM = CLOSE PARENS?             00695
+         BNE   CARDSYNT            NO, SYNTAX ERROR                     00696
+         BXH   R3,R4,CARDSYNT      YES, ADVANCE TO NEXT COLUMN          00697
+         NI    FLAG2,255-PAREN     CLEAR PARENS FLAG                    00698
+         B     GETNTDLM            GO TEST NEXT DELIMITER               00699
+GETNTBLK CLI   0(R3),C' '          DLM BLANK?                           00700
+         BNE   CARDSYNT            NO, ERROR                            00701
+GOTNAME  CLI   WORKAREA,C' '       YES, NULL NAME?                      00702
+         BE    CARDSYNT            YES, ERROR                           00703
+         SPACE 1                                                        00704
+* IF THE NAME IS A DDNAME, THEN VALIDATE IT AGAINST THE TIOT.           00705
+         TM    FLAG2,DDNAME        NO, OPND OBJECT A DDNAME?            00706
+         BZ    GOTNRET             NO, GO RETURN TO CALLER              00707
+         L     R1,CVTPTR           POINT TO THE CVT                     00708
+         L     R1,CVTTCBP-CVT(,R1) PNT TO TCB NEW/OLD PTRS              00709
+         L     R1,4(,R1)           PNT TO OUR TCB                       00710
+         L     R1,TCBTIO-TCB(,R1)  PNT TO TIOT                          00711
+         LA    R1,TIOENTRY-TIOT(,R1) POINT TO 1ST DD ENTRY              00712
+         USING TIOENTRY,R1         DECLARE TIOT DD ENTRY BASE           00713
+         SR    R0,R0               CLEAR FOR "IC"                       00714
+TIOTLP   AR    R1,R0               POINT TO NEXT TIOT DD ENTRY          00715
+         IC    R0,TIOELNGH         GET ITS LENGTH                       00716
+         LTR   R0,R0               END OF TIOT?                         00717
+         BZ    CARDBDDN            YES, MISSING DDNAME ERROR            00718
+         CLC   TIOEDDNM,WORKAREA   NO, RIGHT DDNAME?                    00719
+         BNE   TIOTLP              NO, LOOP FOR NEXT DD ENTRY           00720
+GOTNRET  LM    R14,R1,SAVER14B     RESTORE ALL WORK REGISTERS           00721
+         BR    R14                 RETURN TO CALLER                     00722
+         DROP  R1                  RELEASE THE TIOT DD ENTRY BASE       00723
+         TITLE 'OFFLIAD -- INERR - INPUT DATA SET SYNAD ROUTINE'        00724
+         USING DECB,R2             DECLARE THE INPUT DECB BASE          00725
+INERR    SYNADAF ACSMETH=BSAM      NO, GET SYNAD MSG                    00726
+         L     R13,4(,R13)         RESTORE BASE REGISTER                00727
+         MVI   RCD+1,8             SET COMPLETION CODE                  00728
+         OI    FLAG2,IOERROR       REMEMBER THE ERROR                   00729
+         MVC   IOERTEXT,68(R1)     SAVE SYNAD MSG TEXT                  00730
+         SPACE 1                                                        00731
+* FORCE THE RESIDUAL COUNT TO A (HIGHER) MULTIPLE OF THE LRECL.         00732
+         L     R15,DECBIOB         PNT TO THE IOB                       00733
+         LH    R1,14(,R15)         GET THE RESIDUAL COUNT               00734
+         LH    R15,INLRECL         GET THE LRECL                        00735
+         AR    R1,R15              ROUND -                              00736
+         BCTR  R1,0                 THE -                               00737
+         SR    R0,R0                 RESIDUAL -                         00738
+         DR    R0,R15                 COUNT -                           00739
+         MR    R0,R15                  UP                               00740
+         L     R15,DECBIOB         POINT TO THE IOB AGAIN               00741
+         STH   R1,14(,R15)         STORE NEW RESIDUAL COUNT             00742
+         SPACE 1                                                        00743
+* ISSUE SYNADRLS TO RELEASE SYNAD'S SAVE AREA AND ERROR MESSAGE BUFFER  00744
+         L     R13,8(,R13)         RESTORE SYNAD'S SAVE AREA POINTER    00745
+         LNR   R15,R13             INSURE R15 NEGITIVE                  00746
+         SVC   68                  ISSUE SYNADRLS                       00747
+         BR    R14                 RETURN TO CHECK ROUTINE              00748
+         DROP  R2                  RELEASE DECB ABSE                    00749
+         TITLE 'OFFLOAD -- NEXTCARD - GET A CONTINUATION CARD'          00750
+NEXTCARD STM   R14,R1,SAVER14B     SAVE ALL WORK REGISTERS              00751
+         #PUT  PRECARD             ECHO OUT THE CURRENT CARD            00752
+         MVI   PRECARD,C' '        CLEAR ANY POSSIBLE CARRAGE CONTROL   00753
+         OI    FLAG2,CONTINUE      FLAG CONTU ICO EOD                   00754
+         GET   SYSIN,CARD          GET THE NEXT CARD                    00755
+         SPACE 1                                                        00756
+* RE-INITIALIZE THE CARD SCANNER                                        00757
+         LA    R3,CARD             RESET THE CARD SCANNER               00758
+         CLI   0(R3),C' '          MUST BE BLANK                        00759
+         BNE   CARDSYNT            IT'S NOT; ERROR                      00760
+OPNDLP2  BXH   R3,R4,CARDSYNT      SCAN TO NEXT COLUMN                  00761
+         CLI   0(R3),C' '          STILL BLANK?                         00762
+         BE    OPNDLP2             YES, LOOP BACK                       00763
+         BCTR  R3,0                NO, BACK OFF                         00764
+         LM    R14,R1,SAVER14B     RESTORE ALL WORK REGISTERS           00765
+         BR    R14                 RETURN TO CALLER                     00766
+         TITLE 'OFFLOAD -- OUTERR - OUTPUT DATA SET SYNAD ROUTINE'      00767
+OUTERR   SYNADAF ACSMETH=QSAM      GET SYNAD MSG                        00768
+         L     R13,4(,R13)         RESTORE LOCAL BASE REGISTER          00769
+         MVI   RCD+1,12            SET PROGRAM COMPLETION CODE          00770
+         SPACE 1                                                        00771
+* PRINT THE SYNAD MESSAGE                                               00772
+         MVC   67-L'IOERPFIX(L'IOERPFIX+1,R1),IOERPFIX-1 MSG PREFIX     00773
+         LA    R1,67-L'IOERPFIX(,R1) PNT TO ERR MSG                     00774
+         #PUT  (R1)                PRINT IT                             00775
+         SPACE 1                                                        00776
+* ISSUE SYNADRLS TO RELEASE SYNAD'S SAVE AREA AND MESSAGE BUFFER.       00777
+         L     R13,8(,R13)         PNT BACK TO SYNAD SAVE AREA          00778
+         LNR   R15,R13             INSURE R15 NEGITIVE                  00779
+         SVC   68                  ISSUE SYNADRLS                       00780
+         SPACE 1                                                        00781
+* FORCE PROGRAM TERMINATION                                             00782
+         LA    R2,SYSIN            PNT TO THE READER DCB                00783
+         BAL   R14,CLOSE           CLOSE IT                             00784
+         L     R10,ENDDDNS         PNT TO END OF DDNAMES LIST           00785
+         B     DSDONE              GO RETURN TO CALLER (EVENTUALLY)     00786
+         TITLE 'OFFLOAD -- PUTNAMES - SCAN NAMES FROM CONTROL STATEMENT*00787
+                S AND PUT THEM INTO A LIST'                             00788
+PUTNAMES STM   R14,R15,SAVER14A    SAVE THE RETURN ADDRESS              00789
+         BXH   R3,R4,CARDSYNT      SCAN TO NEXT COLUMN                  00790
+         SPACE 1                                                        00791
+* CHECK FOR LEADING PARENS, THEN GET A NAME                             00792
+         CLI   1(R3),C'('          OPEN PARENS?                         00793
+         BNE   GNAME               NO, SKIP                             00794
+         OI    FLAG2,PAREN         YES, REMEMBER IT                     00795
+         BXH   R3,R4,CARDSYNT      SCAN TO NEXT COLUMN                  00796
+GNAME    BAL   R14,GETNAME         GO SCAN OUT THIS NAME                00797
+         SPACE 1                                                        00798
+* CHECK FOR REDUNDANT NAMES                                             00799
+         LR    R15,R0              POINT TO START OF LIST               00800
+RDUNTEST CR    R15,R1              LIST EXAUSTED YET?                   00801
+         BNL   NEWNAME             YES, NEW NAME IS UNIQUE              00802
+         CLC   0(L'DCBDDNAM,R15),WORKAREA NO, NEW NAME UNIQUE?          00803
+         BE    CARDRDUN            NO, ERROR                            00804
+         LA    R15,L'DCBDDNAM(,R15) MAYBE, ADVANCE THE LIST POINTER     00805
+         B     RDUNTEST            LOOP TO TEST AGAIN                   00806
+         SPACE 1                                                        00807
+* SAVE THE NEW NAME IN THE LIST (IF THERE IS ROOM FOR IT)               00808
+NEWNAME  LA    R14,L'DCBDDNAM(,R1) GET NEW END OF LIST                  00809
+         C     R14,WORKEND         CORE EXHAUSTED?                      00810
+         BH    CARDCORE            YES, ERROR                           00811
+         MVC   0(L'DCBDDNAM,R1),WORKAREA NO, COPY NEW NAME INTO LIST    00812
+         LR    R1,R14              SET NEW END OF LIST PTR              00813
+         SPACE 1                                                        00814
+* PROCESS TRAILING DELIMITERS AND POSSIBILY LOOP BACK FOR ANOTHER       00815
+* NAME                                                                  00816
+         CLI   0(R3),C','          COMMA DELIMITER?                     00817
+         BNE   PUTNRET             NO, MUST B END OF STATEMENT (CC¬=0)  00818
+         TM    FLAG2,PAREN         YES, WITHIN PARENS?                  00819
+         BZ    PUTNRET             NO, END OF OPERAND (CC=0)            00820
+         CLI   1(R3),C' '          YES, CONTINUE CARD NEEDED?           00821
+         BNE   GNAME               NO, GO SCAN OUT THE NEXT NAME        00822
+         BAL   R14,NEXTCARD        YES, GO GET THE NEXT CARD            00823
+         B     GNAME               GO SCAN OUT THE NEXT NAME            00824
+PUTNRET  LM    R14,R15,SAVER14A    RESTORE THE RETURN ADDRESS (CC SET)  00825
+         BR    R14                 RETURN TO CALLER                     00826
+         TITLE 'OFFLOAD -- PUTSYSP - PRINT MESSAGES AND CONTROL PAGINAT*00827
+               ION'                                                     00828
+PUTSYSP  STM   R14,R1,SAVER14D     SAVE WORK REGISTERS                  00829
+         MVC   SAVECCC,1(R1)       SAVE CARRAGE CONTROL CHARACTER       00830
+         SPACE 1                                                        00831
+* DETERMINE THE CARRAGE CONTROL CHARACTER.                              00832
+         LA    R15,CCC+L'CCC       POINT PAST VALID CC CHARACTERS       00833
+         LA    R0,L'CCC            GET LOOP CONTROL                     00834
+CCCLP    BCTR  R15,0               POINT TO NEXT CCC                    00835
+         CLC   1(1,R1),0(R15)      MATCH?                               00836
+         BE    GOTCCC              YES, SKIP OUT                        00837
+         BCT   R0,CCCLP            NO, LOOP FOR NEXT CCC                00838
+         SPACE 1                                                        00839
+* UNRECOGNIZED CONTROL CHARACTER - SET NEW TITLE LINE AND FORCE PAGE    00840
+* EJECT ON NEXT CALL.                                                   00841
+         MVC   TITLEBUF,TITLEBUF-1 NO MATCH; CLEAR TITLE BUFFER         00842
+         MVC   TITLEMVC+1(1),0(R1) SET MOVE INSTR LENGTH FIELD          00843
+TITLEMVC MVC   TITLEBUF(*-*),1(R1) SET NEW TITLE                        00844
+         STH   R0,LINES2GO         FORCE PAGE EJEXT ON NEXT CALL        00845
+         B     PUTSRET             GO RETURN TO CALLER                  00846
+         SPACE 1                                                        00847
+* CARRAGE CONTROL CHARACTER IDENTIFIED - INCRIMENT LINE COUNT FOR THIS  00848
+* PAGE.                                                                 00849
+GOTCCC   BCTR  R0,0                GET # LINES REPRESENTED BY THE CCC   00850
+         AH    R0,LINES2GO         GET # LINES LEFT ON PAGE             00851
+         BNP   NOEJECT             PAGE NOT DONE YET                    00852
+         SPACE 1                                                        00853
+* PAGE FULL - EJECT TO NEW PAGE AND PRINT THE TITLE LINE WITH A PAGE    00854
+* COUNTER.                                                              00855
+         AP    PAGECTR,=P'1'       PAGE DONE; INCR PAGE #               00856
+         MVC   PAGENO,EDITMASK     GET THE EDIT MASK                    00857
+         ED    PAGENO-1(L'PAGENO+1),PAGECTR CNVRT TO EBCDIC             00858
+         MVI   PRTLRECL+1,121      SET LRECL                            00859
+         PUT   SYSPRINT,TITLEBUF   PRINT THE TITLE -                    00860
+         MVI   PRTLRECL+1,L'BLNK1   AND A -                             00861
+         PUT   SYSPRINT,BLNK1        BLANK LINE                         00862
+         L     R1,SAVER1D          RESTORE THE ORIGINAL MSG PTR         00863
+         MVI   1(R1),C' '          CHANGE TO BLANK CCC                  00864
+         LH    R0,=Y(3-LINECT)     RESET LINES TO GO                    00865
+NOEJECT  STH   R0,LINES2GO         STORE NEW LINES 2 GO                 00866
+         SPACE 1                                                        00867
+* PRINT THE MESSAGE AND RETURN TO CALLER.                               00868
+         MVC   PRTLRECL+1(1),0(R1) SET LRECL                            00869
+         LA    R0,1(,R1)           POINT TO THE MESSAGE                 00870
+         PUT   SYSPRINT,(0)        PRINT THE MESSAGE                    00871
+PUTSRET  LM    R14,R1,SAVER14D     RESTORE WORK REGISTERS               00872
+         MVC   1(1,R1),SAVECCC     RESTORE THE ORIGINAL CCC             00873
+         BR    R14                 RETURN TO CALLER                     00874
+         TITLE 'OFFLOAD -- RDRERR - SYSIN DATA SET SYNAD ROUTINE'       00875
+RDRERR   ST    R14,SAVER14C        SAVE THE RETURN ADDRESS              00876
+         SYNADAF ACSMETH=QSAM      GET THE SYNAD MESSAGE                00877
+         LR    R15,R13             SAVE PTR TO SYNAD'S SAVE AREA        00878
+         L     R13,4(,R13)         PNT BACK TO OUR OWN SAVE AREA        00879
+         MVC   12(60,R15),12(R13)  SAVE ASVE AREA CONTENTS              00880
+         MVI   RCD+1,8             SET PGM COMPLETION CODE              00881
+         MVC   67-L'IOERPFIX(L'IOERPFIX+1,R1),IOERPFIX-1 MSG PREFIX     00882
+         LA    R1,67-L'IOERPFIX(,R1) PNT TO MSG TEXT                    00883
+         #PUT  (R1)                PRINT SYNAD MSG                      00884
+         LR    R15,R13             SAVE LOCAL SAVE AREA PTR             00885
+         L     R13,8(,R13)         PNT BACK TO SYNAD'S SAVE AREA        00886
+         MVC   12(60,R15),12(R13)  RESTORE LOCAL SAVE AREA CONTENTS     00887
+         LNR   R15,R13             INSURE R15 NEGITIVE                  00888
+         SVC   68                  ISSUE SYNADRLS                       00889
+         L     R14,SAVER14C        RESTORE RETURN ADDRESS               00890
+         BR    R14                 RETURN TO QSAM GET                   00891
+         TITLE 'OFFLOAD -- DATA - DATA CONTROL BLOCKS'                  00892
+         PRINT GEN                                                      00893
+         SPACE 3                                                        00894
+SYSIN    DCB   DDNAME=SYSIN,DSORG=PS,MACRF=GM,RECFM=FB,LRECL=80,       *00895
+               OPTCD=C,EODAD=RDREOD,EXLST=CARDXLST,SYNAD=RDRERR,       *00896
+               EROPT=ACC                                                00897
+         ORG   SYSIN                                                    00898
+RDR      #DCBD DSORG=QS                                                 00899
+         ORG   ,                                                        00900
+         SPACE 3                                                        00901
+SYSPRINT DCB   DDNAME=SYSPRINT,DSORG=PS,MACRF=PM,RECFM=UA,LRECL=121,   *00902
+               BLKSIZE=121,OPTCD=C,BUFNO=3,EROPT=ACC                    00903
+         ORG   SYSPRINT                                                 00904
+PRT      #DCBD DSORG=QS                                                 00905
+         ORG   ,                                                        00906
+         SPACE 3                                                        00907
+OUT      DCB   DSORG=PS,MACRF=PM,RECFM=FB,LRECL=&LRECL,OPTCD=C,     NWK*00908
+               EXLST=CARDXLST,SYNAD=OUTERR                              00909
+         ORG   OUT                                                      00910
+OUT      #DCBD DSORG=QS                                                 00911
+         ORG   ,                                                        00912
+         SPACE 3                                                        00913
+IN       DCB   DSORG=PS,MACRF=RP,RECFM=FB,LRECL=&LRECL,OPTCD=C,     NWK*00914
+               EODAD=MEMBERLP,EXLST=CARDXLST,SYNAD=INERR                00915
+         ORG   IN                                                       00916
+IN       #DCBD DSORG=BS                                                 00917
+         ORG   ,                                                        00918
+         SPACE 3                                                        00919
+DRCTY    DCB   DSORG=PS,MACRF=GM,RECFM=F,LRECL=256,BLKSIZE=256,OPTCD=C,*00920
+               BUFNO=5,EODAD=DRCERR,SYNAD=DRCERR                        00921
+         ORG   DRCTY                                                    00922
+DRC      #DCBD DSORG=QS                                                 00923
+         ORG   ,                                                        00924
+         SPACE 3                                                        00925
+         PRINT GEN                                                      00926
+         TITLE 'OFFLOAD -- DATA - MODEL READ DECB'                      00927
+         READ  DECBMODL,SF,IN,*-*,MF=L                                  00928
+         ORG   DECBMODL+(DECBBUFR-DECB) SAVE SOME SPACE                 00929
+         TITLE 'OFFLOAD -- DATA - MISCELLANIOUS'                        00930
+WORKAREA DS    D                   WORK AREA                            00931
+RDAREA   DS    XL256               DIRECTORY BLOCK LOCAL BUFFER         00932
+         SPACE 3                                                        00933
+GETMQTY  DC    A(OSCORE+2048,X'FFFFF8') VARIABLE GETMAIN REQUIREMENTS   00934
+         SPACE 1                                                        00935
+WORKSTAR DS    A                   GOTTEN CORE START                    00936
+WORKEND  DS    A                   GOTTEN CORE END                      00937
+         SPACE 1                                                        00938
+BUFSSIZE DS    A                   INPUT BUFFER 'POOL' SIZE             00939
+BUFSSTAR DS    A                   INPUT BUFFER 'POOL' START            00940
+         SPACE 1                                                        00941
+ENDDDNS  DS    A                   END OF INPUT DDNAMES LIST            00942
+ENDMNMS  DS    A                   END OF MEMBER NAMES LIST (USUALLY)   00943
+         SPACE 1                                                        00944
+SAVER14A DS    2A                  R14 - R15 SAVE AREA                  00945
+SAVER14B DS    4A                  R14 - R1 SAVE AREA                   00946
+SAVER14C DS    A                   R14 SAVE AREA                        00947
+SAVER14D DS    3A                  R14 - R0 SAVE AREA                   00948
+SAVER1D  DS    A                   R1 SAVE AREA                         00949
+SAVESCAN DS    A                   CONTROL CARD SCANNER SAVE AREA       00950
+         SPACE 1                                                        00951
+CARDXLST DC    0A(0),X'85',AL3(CARDEXIT) SYSIN, IN, OUT DCB EXIT LIST   00952
+DRCTYEND DS    A                   END OF CURRENT DRCTY BLK             00953
+OFFLPTR  DS    A                   LOCATION IN MSG TXT 4 IN DDN         00954
+         SPACE 3                                                        00955
+BLDLPARM DS    0Y                  SPECIAL BLDL PARAMETER LIST          00956
+BLDENTCT DC    Y(0)                ENTRY COUNT (THE MAGIC NUMBER)       00957
+BLDENTLN DC    Y(12)               ENTRY LENGTH (PROBABLY IGNORED)      00958
+BLDLKEY  DC    XL8'00'             COMPARE KEY (MUST BE ZERO)           00959
+BLDLTTR0 DC    Y(*-*),AL1(*-*,0)   TTR0 OF DESIRED BLOCK                00960
+         SPACE 1                                                        00961
+SEQFAKRY DC    Y(0),AL1(1,0)       FAKE TTR0                            00962
+EFFS     DC    (L'DCBDDNAM)X'FF',Y(0),2AL1(0) FAKE TERMINATER           00963
+SEQFAKLN EQU   *-SEQFAKRY          LENGTH OF FAKES                      00964
+         SPACE 1                                                        00965
+RCD      DC    Y(0)                PROGRAM COMPLETION CODE              00966
+LINES2GO DC    Y(0)                PRINT PAGE LINES 2 GO                00967
+         SPACE 3                                                        00968
+FLAG     DS    X                   FUNCTION FLAG BYTE                   00969
+UNLOAD   EQU   X'80'               UNLOAD CONTROL CARD ENCOUNTERED      00970
+SELECT   EQU   X'40'               SELECT CONTROL CARD ENCOUNTERED      00971
+EXCLUDE  EQU   X'20'               EXCLUDE CONTROL CARD ENCOUNTERED     00972
+UPDAT    EQU   X'10'               OUTPUT 4 IEBUPDAT (NOT IEBUPDTE)     00973
+NOTPDS   EQU   X'08'               INPUT DS IS NOT PARTITIONED          00974
+CTLCDERR EQU   X'04'               IEBUPDTE CTL CARD FROM PDS           00975
+UPDTE    EQU   X'02'               OUTPUT 4 IEBUPDTE (NOT IEBUPDAT)     00976
+         SPACE 1                                                        00977
+FLAG2    DS    X                   SYNTAX FLAG BYTE                     00978
+GOTIN    EQU   X'80'               "I=" OPERAND ENCOUNTERED             00979
+GOTOUT   EQU   X'40'               "O=" OPERAND ENCOUNTERED             00980
+GOTTYPE  EQU   X'20'               "T=" OPERAND ENCOUNTERED             00981
+PAREN    EQU   X'10'               OPEN PERENTHESIS ENCOUNTERED         00982
+CONTINUE EQU   X'08'               CONTINUATION CARD BEING READ         00983
+DDNAME   EQU   X'04'               OPND OBJECT IS A DDNAME              00984
+IOERROR  EQU   X'04'               AN I/O ERROR HAS OCCURED             00985
+         SPACE 1                                                        00986
+VALID    DC    C' $#@ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'              00987
+CCC      DC    C'+ 0-'             CARRAGE CONTROL CHARACTERS           00988
+         SPACE 1                                                        00989
+PAGECTR  DC    PL3'0'                                                   00990
+EDITMASK DC    X'2020202120'                                            00991
+SAVECCC  DS    C                                                        00992
+         SPACE 3                                                        00993
+         LTORG                                                          00994
+         TITLE 'OFFLOAD -- DATA - MESSAGES'                             00995
+ADDCARD  DC    CL&LRECL'./       ADD'                               NWK 00996
+         SPACE 3                                                        00997
+         DC    AL1(L'BLNK1)                                             00998
+BLNK1    DC    C'  '                                                    00999
+         SPACE 3                                                        01000
+         DC    AL1(L'BLNK3)                                             01001
+BLNK3    DC    C'- '                                                    01002
+         SPACE 3                                                        01003
+         DC    AL1(L'CTLERR1)                                           01004
+CTLERR1  DC    C' WARNING - THE FOLLOWING CARD(S) RESEMBLE ''IEBUPDTE''*01005
+                CONTROL CARDS'                                          01006
+         SPACE 3                                                        01007
+         DC    AL1(L'CTLERR2)                                           01008
+CTLERR2  DC    C'           THE ''./'' WILL BE REPLACED BY ''><'''      01009
+         SPACE 3                                                        01010
+         DC    AL1(L'IOERPFIX+L'IOERTEXT)                               01011
+IOERPFIX DC    C' I/O ERROR - '                                         01012
+IOERTEXT DS    CL60                                                     01013
+         SPACE 3                                                        01014
+         DC    AL1(L'DRCTYERR+L'DCBDDNAM)                               01015
+DRCTYERR DC    C' I/O ERROR - WHILE READING THE DIRECTORY FOR '         01016
+         DS    CL(L'DCBDDNAM)                                           01017
+         SPACE 3                                                        01018
+         DC    AL1(L'EODERR)                                            01019
+EODERR   DC    C' ERROR - MISSING CONTINUATION CARD'                    01020
+         SPACE 3                                                        01021
+         DC    AL1(L'EOPM)                                              01022
+EOPM     DC    C'-END OF PROGRAM'                                       01023
+         SPACE 3                                                        01024
+         DC    AL1(L'ERRCARD+L'CARD2)                                   01025
+ERRCARD  DC    CL11' '                                                  01026
+CARD2    DS    CL&LRECL                                             NWK 01027
+         SPACE 3                                                        01028
+         DC    AL1(L'NOCOREM)                                           01029
+NOCOREM  DC    C' ERROR - THERE IS INSUFFICIENT CORE TO PROCESS THIS RE*01030
+               QUEST'                                                   01031
+         SPACE 3                                                        01032
+         DC    AL1(L'NOSYSIN)                                           01033
+NOSYSIN  DC    C' ERROR - THE SYSIN DD STATEMENT IS MISSING'            01034
+         SPACE 3                                                        01035
+         DC    AL1(NTSELLEN)                                            01036
+NTSELMSG DC    C' WARNING - '                                           01037
+NTSELMBR DS    CL(L'DCBDDNAM)                                           01038
+         DC    C' NOT FOUND'                                            01039
+NTSELLEN EQU   *-NTSELMSG                                               01040
+         SPACE 3                                                        01041
+         DC    AL1(OFFLMLEN)                                            01042
+OFFLMSG  DC    C' OFFLOADING '                                          01043
+OFFLMBRN DS    CL(L'DCBDDNAM)                                           01044
+         DC    C' TO '                                                  01045
+OFFLDDNS DS    CL(6+2*(L'DCBDDNAM))'******** FROM ********'             01046
+OFFLMLEN EQU   *-OFFLMSG                                                01047
+         SPACE 3                                                        01048
+         DC    AL1(L'PGMTERM)                                           01049
+PGMTERM  DC    C'-PROGRAM TERMINATED'                                   01050
+         SPACE 3                                                        01051
+         DC    AL1(L'PRECARD+L'CARD)                                    01052
+PRECARD  DC    CL30' '                                                  01053
+CARD     DS    CL80                                                     01054
+         SPACE 3                                                        01055
+         DC    C' '                                                     01056
+TITLEBUF DC    CL111'1',C'PAGE '                                        01057
+PAGENO   DS    CL5                                                      01058
+         SPACE 3                                                        01059
+         DC    AL1(L'TITLE1-1)                                          01060
+TITLE1   DC    C'1ADS -- OFFLOAD - PDS OFFLOADING PROGRAM'              01061
+         SPACE 3                                                        01062
+         END   OFFLOAD                                                  01063
